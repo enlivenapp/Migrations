@@ -1,0 +1,27 @@
+{
+    "name": "enlivenapp/migrations",
+    "description": "Database migrations and seeds for modular PHP applications",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "enlivenapp",
+            "email": "mw@enlivenapp.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "composer/semver": "^3.0"
+    },
+    "suggest": {
+        "flightphp/runway": "Required for CLI migration commands (php runway migrate:*)",
+        "enlivenapp/flight-school": "Easy Plugin Automation and Manager"
+    },
+    "autoload": {
+        "psr-4": {
+            "Enlivenapp\\Migrations\\": "src/"
+        }
+    }
+}

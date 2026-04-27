@@ -46,12 +46,13 @@ class MigrateAllCommand extends AbstractBaseCommand
         $io = $this->app()->io();
 
         if ($dryRun) {
-            $io->comment('Dry-run mode: changes will be rolled back.', true);
+            $io->comment('Dry-run mode is not supported with migrate:all. Use migrate:single --dry-run instead.', true);
+            return;
         }
 
         try {
-            $migrate  = CommandHelper::build();
-            $results = $migrate->runAll($dryRun);
+            $migrate = CommandHelper::build();
+            $moduleResults = $migrate->runMigrate();
         } catch (LockException $e) {
             $io->error($e->getMessage(), true);
             return;
@@ -60,29 +61,35 @@ class MigrateAllCommand extends AbstractBaseCommand
             return;
         }
 
-        if (empty($results)) {
+        if (empty($moduleResults)) {
             $io->info('Nothing to migrate.', true);
             return;
         }
 
-        foreach ($results as $result) {
-            if ($result->isSuccess()) {
-                $io->ok('  ' . ($dryRun ? '[dry] ' : '') . 'Migrated: ' . $result->getName(), true);
-            } else {
-                $io->error('  Failed:   ' . $result->getName(), true);
-                $io->error('  Reason:   ' . $result->getMessage(), true);
+        $hasFailure = false;
+
+        foreach ($moduleResults as $moduleResult) {
+            foreach ($moduleResult->getMigrationResults() as $r) {
+                if ($r->isSuccess()) {
+                    $io->ok('  Migrated: ' . $r->getName(), true);
+                } else {
+                    $io->error('  Failed:   ' . $r->getName(), true);
+                    $io->error('  Reason:   ' . $r->getMessage(), true);
+                    $hasFailure = true;
+                }
+            }
+
+            foreach ($moduleResult->getSeedResults() as $r) {
+                if ($r->isSuccess()) {
+                    $io->ok('  Seeded:   ' . $r->getModuleName() . ':' . $r->getTable(), true);
+                } else {
+                    $io->error('  Seed failed: ' . $r->getTable() . ' — ' . $r->getMessage(), true);
+                }
             }
         }
 
-        $failed = array_filter($results, fn($r) => ! $r->isSuccess());
-
-        if (! empty($failed)) {
+        if ($hasFailure) {
             $io->error('Migrations halted due to failure.', true);
-            return;
-        }
-
-        if ($dryRun) {
-            $io->comment('Dry-run complete - no changes committed.', true);
         } else {
             $io->ok('All migrations complete.', true);
         }

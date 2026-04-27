@@ -88,8 +88,57 @@ class MigrationSetup
     public function runMigrate(?string $moduleName = null): array
     {
         $this->ensureTrackingTable();
-        $this->lock->ensureStore();
 
+        $dirs = $this->resolveAllMigrationDirs();
+
+        if ($moduleName !== null) {
+            if (! isset($dirs[$moduleName])) {
+                throw new MigrationException(
+                    "No migration directory found for module \"{$moduleName}\". "
+                    . 'Does it have a Database/Migrations directory matching the configured paths?'
+                );
+            }
+            $dirs = [$moduleName => $dirs[$moduleName]];
+        }
+
+        // Preload in bulk — 2 queries total
+        $allInstalledVersions = $this->loadAllInstalledVersions();
+        $allSeededVersions    = $this->loadAllSeededVersions();
+        $executedVersions     = $this->getExecutedVersions();
+
+        // Check if there's anything to do before acquiring the lock
+        $hasPendingMigrations = false;
+        $hasPendingSeeds      = false;
+
+        foreach ($dirs as $name => $dir) {
+            $files = $this->discoverMigrationFiles($dir);
+            foreach ($files as $version => $info) {
+                if (! in_array($version, $executedVersions, true)) {
+                    $hasPendingMigrations = true;
+                    break 2;
+                }
+            }
+        }
+
+        if (! $hasPendingMigrations) {
+            foreach ($dirs as $name => $dir) {
+                $installedVersion = $allInstalledVersions[$name] ?? null;
+                $seededVersion    = $allSeededVersions[$name] ?? null;
+                if ($installedVersion !== null && $installedVersion !== $seededVersion) {
+                    $seedDir = $this->resolveModuleSeedDir($dir);
+                    if ($seedDir !== null && $this->resolveSeedData($name, $seedDir) !== null) {
+                        $hasPendingSeeds = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (! $hasPendingMigrations && ! $hasPendingSeeds) {
+            return [];
+        }
+
+        // Something to do — now lock
         if (! $this->lock->acquire()) {
             throw new LockException(
                 'Migration lock is held by another process. '
@@ -101,26 +150,15 @@ class MigrationSetup
 
         try {
             $batch = $this->nextBatch();
-            $dirs  = $this->resolveAllMigrationDirs();
-
-            if ($moduleName !== null) {
-                if (! isset($dirs[$moduleName])) {
-                    throw new MigrationException(
-                        "No migration directory found for module \"{$moduleName}\". "
-                        . 'Does it have a Database/Migrations directory matching the configured paths?'
-                    );
-                }
-                $dirs = [$moduleName => $dirs[$moduleName]];
-            }
 
             foreach ($dirs as $name => $dir) {
                 try {
                     $moduleResult     = new ModuleResult($name);
-                    $installedVersion = $this->readInstalledVersion($name);
-                    $seededVersion    = $this->getSeededVersion($name);
+                    $installedVersion = $allInstalledVersions[$name] ?? null;
+                    $seededVersion    = $allSeededVersions[$name] ?? null;
 
                     // Run pending migrations
-                    $migrationResults = $this->runModuleMigrations($name, $dir, $batch, false);
+                    $migrationResults = $this->runModuleMigrations($name, $dir, $batch, false, $executedVersions);
                     $moduleResult->setMigrationResults($migrationResults);
 
                     $ranMigrations = ! empty($migrationResults);
@@ -187,8 +225,6 @@ class MigrationSetup
     public function runAll(bool $dryRun = false): array
     {
         $this->ensureTrackingTable();
-        $this->lock->ensureStore();
-
         if (! $this->lock->acquire()) {
             throw new LockException(
                 'Migration lock is held by another process. ' .
@@ -244,8 +280,6 @@ class MigrationSetup
     public function runModule(string $moduleName, bool $dryRun = false): array
     {
         $this->ensureTrackingTable();
-        $this->lock->ensureStore();
-
         if (! $this->lock->acquire()) {
             throw new LockException(
                 'Migration lock is held by another process. ' .
@@ -301,8 +335,6 @@ class MigrationSetup
     public function rollbackLast(?string $module = null, bool $dryRun = false): array
     {
         $this->ensureTrackingTable();
-        $this->lock->ensureStore();
-
         if (! $this->lock->acquire()) {
             throw new LockException(
                 'Migration lock is held by another process. ' .
@@ -347,8 +379,6 @@ class MigrationSetup
     public function purgeModule(string $moduleName, bool $dryRun = false): array
     {
         $this->ensureTrackingTable();
-        $this->lock->ensureStore();
-
         if (! $this->lock->acquire()) {
             throw new LockException(
                 'Migration lock is held by another process. ' .
@@ -391,7 +421,7 @@ class MigrationSetup
      */
     public function forceUnlock(bool $dryRun = false): array
     {
-        $this->lock->ensureStore();
+        $this->ensureTrackingTable();
 
         $info = $this->lock->getLockInfo();
 
@@ -514,45 +544,44 @@ class MigrationSetup
 
     private function ensureTrackingTable(): void
     {
-        $tables = $this->db->query(
-            "SELECT TABLE_NAME FROM information_schema.TABLES "
-            . "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?)",
-            [self::TRACKING_TABLE, self::SEED_TABLE]
+        $markerFile = $this->projectRoot . DIRECTORY_SEPARATOR . '.migrations_installed';
+
+        if (file_exists($markerFile)) {
+            return;
+        }
+
+        $this->db->execute(
+            "CREATE TABLE IF NOT EXISTS `" . self::TRACKING_TABLE . "` (
+                `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `version`     VARCHAR(32) NOT NULL,
+                `class`       VARCHAR(255) NOT NULL,
+                `group`       VARCHAR(64) NOT NULL DEFAULT 'default',
+                `package`     VARCHAR(255) NOT NULL,
+                `batch`       INT UNSIGNED NOT NULL,
+                `breakpoint`  TINYINT(1) NOT NULL DEFAULT 0,
+                `reversal_ops` TEXT NULL,
+                `run_at`      DATETIME NOT NULL,
+                PRIMARY KEY (`id`),
+                INDEX `idx_migrations_version` (`version`),
+                INDEX `idx_migrations_package` (`package`),
+                INDEX `idx_migrations_batch` (`batch`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
-        $existing = array_column($tables, 'TABLE_NAME');
 
-        if (! in_array(self::TRACKING_TABLE, $existing, true)) {
-            $this->db->execute(
-                "CREATE TABLE `" . self::TRACKING_TABLE . "` (
-                    `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `version`     VARCHAR(32) NOT NULL,
-                    `class`       VARCHAR(255) NOT NULL,
-                    `group`       VARCHAR(64) NOT NULL DEFAULT 'default',
-                    `package`     VARCHAR(255) NOT NULL,
-                    `batch`       INT UNSIGNED NOT NULL,
-                    `breakpoint`  TINYINT(1) NOT NULL DEFAULT 0,
-                    `reversal_ops` TEXT NULL,
-                    `run_at`      DATETIME NOT NULL,
-                    PRIMARY KEY (`id`),
-                    INDEX `idx_migrations_version` (`version`),
-                    INDEX `idx_migrations_package` (`package`),
-                    INDEX `idx_migrations_batch` (`batch`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-            );
-        }
+        $this->db->execute(
+            "CREATE TABLE IF NOT EXISTS `" . self::SEED_TABLE . "` (
+                `id`       INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `package`  VARCHAR(255) NOT NULL,
+                `version`  VARCHAR(32) NOT NULL,
+                `run_at`   DATETIME NOT NULL,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_seeds_package` (`package`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
 
-        if (! in_array(self::SEED_TABLE, $existing, true)) {
-            $this->db->execute(
-                "CREATE TABLE `" . self::SEED_TABLE . "` (
-                    `id`       INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `package`  VARCHAR(255) NOT NULL,
-                    `version`  VARCHAR(32) NOT NULL,
-                    `run_at`   DATETIME NOT NULL,
-                    PRIMARY KEY (`id`),
-                    UNIQUE KEY `uq_seeds_package` (`package`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-            );
-        }
+        $this->lock->ensureStore();
+
+        file_put_contents($markerFile, date('Y-m-d H:i:s'));
     }
 
     private function nextBatch(): int
@@ -636,6 +665,54 @@ class MigrationSetup
     }
 
     /**
+     * Load all installed Composer versions at once, indexed by package name.
+     *
+     * @return array<string, string>  package name => version
+     */
+    private function loadAllInstalledVersions(): array
+    {
+        $installedFile = $this->projectRoot . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR
+            . 'composer' . DIRECTORY_SEPARATOR . 'installed.json';
+
+        if (! is_file($installedFile)) {
+            return [];
+        }
+
+        $installed = json_decode(file_get_contents($installedFile), true);
+        $packages  = $installed['packages'] ?? $installed ?? [];
+
+        $versions = [];
+        foreach ($packages as $pkg) {
+            $name    = $pkg['name'] ?? null;
+            $version = $pkg['version'] ?? null;
+            if ($name !== null && $version !== null) {
+                $versions[$name] = ltrim($version, 'v');
+            }
+        }
+
+        return $versions;
+    }
+
+    /**
+     * Load all seeded versions at once, indexed by package name.
+     *
+     * @return array<string, string>  package name => version
+     */
+    private function loadAllSeededVersions(): array
+    {
+        $rows = $this->db->query(
+            'SELECT `package`, `version` FROM `' . self::SEED_TABLE . '`'
+        );
+
+        $versions = [];
+        foreach ($rows as $row) {
+            $versions[$row['package']] = $row['version'];
+        }
+
+        return $versions;
+    }
+
+    /**
      * Read the installed Composer version of a package from vendor/composer/installed.json.
      */
     private function readInstalledVersion(string $packageName): ?string
@@ -697,10 +774,10 @@ class MigrationSetup
      *
      * @return MigrationResult[]
      */
-    private function runModuleMigrations(string $moduleName, string $migrationDir, int $batch, bool $dryRun = false): array
+    private function runModuleMigrations(string $moduleName, string $migrationDir, int $batch, bool $dryRun = false, ?array $executedVersions = null): array
     {
         $files    = $this->discoverMigrationFiles($migrationDir);
-        $executed = $this->getExecutedVersions();
+        $executed = $executedVersions ?? $this->getExecutedVersions();
 
         $results   = [];
         $succeeded = []; // [version => class] of migrations that ran in this batch

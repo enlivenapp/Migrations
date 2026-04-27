@@ -44,8 +44,6 @@ class DatabaseMigrationLock
      */
     public function acquire(): bool
     {
-        $this->ensureStore();
-
         $lockedBy = (string) getmypid();
         $lockedAt = date('Y-m-d H:i:s');
 

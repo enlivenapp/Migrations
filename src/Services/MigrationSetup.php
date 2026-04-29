@@ -29,7 +29,7 @@ use Enlivenapp\Migrations\Services\SchemaBuilder;
  *
  * Two ways to use it:
  *   - From a plugin system: call runMigrate() to run migrations and seeds
- *   - From the CLI (via Runway): call runAll(), runModule(), rollbackLast(), etc.
+ *   - From the CLI (via Runway): call runMigrate(), runModule(), rollbackLast(), etc.
  */
 class MigrationSetup
 {
@@ -85,6 +85,14 @@ class MigrationSetup
      * @throws LockException If the migration lock is held by another process
      * @throws MigrationException If $moduleName is given but not found
      */
+    /**
+     * Run all pending migrations and seeds, optionally scoped to one module.
+     *
+     * @param  string|null $moduleName  Scope to a single module, or null for all
+     * @return ModuleResult[]  Keyed by package name
+     * @throws LockException If the migration lock is held by another process
+     * @throws MigrationException If $moduleName is given but not found
+     */
     public function runMigrate(?string $moduleName = null): array
     {
         $this->ensureTrackingTable();
@@ -101,44 +109,42 @@ class MigrationSetup
             $dirs = [$moduleName => $dirs[$moduleName]];
         }
 
-        // Preload in bulk — 2 queries total
+        // Pre-check for pending work before acquiring the lock.
+        // Avoids two UPDATE queries (acquire + release) on every request
+        // when there is nothing to run.
         $allInstalledVersions = $this->loadAllInstalledVersions();
         $allSeededVersions    = $this->loadAllSeededVersions();
         $executedVersions     = $this->getExecutedVersions();
 
-        // Check if there's anything to do before acquiring the lock
-        $hasPendingMigrations = false;
-        $hasPendingSeeds      = false;
+        $hasPending = false;
 
         foreach ($dirs as $name => $dir) {
-            $files = $this->discoverMigrationFiles($dir);
-            foreach ($files as $version => $info) {
+            foreach ($this->discoverMigrationFiles($dir) as $version => $info) {
                 if (! in_array($version, $executedVersions, true)) {
-                    $hasPendingMigrations = true;
+                    $hasPending = true;
                     break 2;
                 }
             }
         }
 
-        if (! $hasPendingMigrations) {
+        if (! $hasPending) {
             foreach ($dirs as $name => $dir) {
                 $installedVersion = $allInstalledVersions[$name] ?? null;
                 $seededVersion    = $allSeededVersions[$name] ?? null;
                 if ($installedVersion !== null && $installedVersion !== $seededVersion) {
                     $seedDir = $this->resolveModuleSeedDir($dir);
-                    if ($seedDir !== null && $this->resolveSeedData($name, $seedDir) !== null) {
-                        $hasPendingSeeds = true;
+                    if ($seedDir !== null && is_file(rtrim($seedDir, '/') . '/Seed.php')) {
+                        $hasPending = true;
                         break;
                     }
                 }
             }
         }
 
-        if (! $hasPendingMigrations && ! $hasPendingSeeds) {
+        if (! $hasPending) {
             return [];
         }
 
-        // Something to do — now lock
         if (! $this->lock->acquire()) {
             throw new LockException(
                 'Migration lock is held by another process. '
@@ -146,6 +152,9 @@ class MigrationSetup
             );
         }
 
+        // Reload executed versions under lock — another process may have
+        // run between our pre-check and lock acquisition.
+        $executedVersions = $this->getExecutedVersions();
         $results = [];
 
         try {
@@ -187,6 +196,7 @@ class MigrationSetup
                         $results[$name] = $moduleResult;
                     }
                 } catch (\Throwable $e) {
+                    error_log('migrations: ' . $name . ' — ' . $e->getMessage());
                     $moduleResult = new ModuleResult($name);
                     $moduleResult->fail($e->getMessage());
                     $results[$name] = $moduleResult;
@@ -222,41 +232,13 @@ class MigrationSetup
      *                            Check each result's success flag individually.
      * @throws LockException  If another migration process is already holding the lock
      */
+    /**
+     * @deprecated Use runMigrate() directly. This method exists for backward compatibility.
+     * @return ModuleResult[]
+     */
     public function runAll(bool $dryRun = false): array
     {
-        $this->ensureTrackingTable();
-        if (! $this->lock->acquire()) {
-            throw new LockException(
-                'Migration lock is held by another process. ' .
-                'If the previous run crashed, release with: php runway migrate:unlock'
-            );
-        }
-
-        $allResults = [];
-
-        try {
-            if ($dryRun) {
-                $this->schemaBuilder->setPretendMode(true);
-            }
-
-            $batch = $this->nextBatch();
-
-            foreach ($this->resolveAllMigrationDirs() as $moduleName => $dir) {
-                try {
-                    $results    = $this->runModuleMigrations($moduleName, $dir, $batch, $dryRun);
-                    $allResults = array_merge($allResults, $results);
-                } catch (\Throwable $e) {
-                    $r = new MigrationResult($moduleName . ':error', $moduleName);
-                    $r->markFailed($e->getMessage());
-                    $allResults[] = $r;
-                }
-            }
-        } finally {
-            $this->schemaBuilder->setPretendMode(false);
-            $this->lock->release();
-        }
-
-        return $allResults;
+        return $this->runMigrate();
     }
 
     /**
@@ -315,7 +297,7 @@ class MigrationSetup
      * Undo the most recent batch of migrations.
      *
      * A "batch" is the group of migrations that were all run together in a single
-     * call to runAll() or runModule(). Every migration in that group shares the same
+     * call to runMigrate() or runModule(). Every migration in that group shares the same
      * batch number, and rolling back a batch reverses all of them in newest-first order.
      *
      * If $module is given, only that package's most recent batch is rolled back. If
@@ -823,10 +805,11 @@ class MigrationSetup
                     try {
                         $this->schemaBuilder->restoreSafetyNet();
                     } catch (\Throwable $restoreError) {
-                        // Safety net restore failed — log but continue with batch reversal
+                        error_log('migrations: safety net restore failed for ' . $moduleName . ':' . $version . ' — ' . $restoreError->getMessage());
                     }
                 }
 
+                error_log('migrations: ' . $moduleName . ':' . $version . ' failed — ' . $e->getMessage());
                 $r = new MigrationResult($moduleName . ':' . $version, $moduleName);
                 $r->markFailed($e->getMessage());
                 $results[] = $r;
@@ -866,6 +849,7 @@ class MigrationSetup
                 $r->markSuccess('batch rollback');
                 $results[] = $r;
             } catch (\Throwable $re) {
+                error_log('migrations: rollback failed for ' . $moduleName . ':' . $version . ' — ' . $re->getMessage());
                 $r = new MigrationResult($moduleName . ':' . $version . ':rollback', $moduleName);
                 $r->markFailed('ROLLBACK FAILED: ' . $re->getMessage());
                 $results[] = $r;
@@ -931,6 +915,7 @@ class MigrationSetup
             $file = $this->findMigrationFile($dirs[$package] ?? null, $version, $class);
 
             if ($file === null) {
+                error_log('migrations: file not found for ' . $package . ':' . $version . ' class ' . $class);
                 $r = new MigrationResult($package . ':' . $version, $package);
                 $r->markFailed("Migration file not found for version {$version}, class {$class}");
                 $results[] = $r;
@@ -948,6 +933,7 @@ class MigrationSetup
                 $r->markSuccess('rolled back');
                 $results[] = $r;
             } catch (\Throwable $e) {
+                error_log('migrations: rollback failed for ' . $package . ':' . $version . ' — ' . $e->getMessage());
                 $r = new MigrationResult($package . ':' . $version, $package);
                 $r->markFailed($e->getMessage());
                 $results[] = $r;
@@ -987,6 +973,7 @@ class MigrationSetup
             $file = $this->findMigrationFile($dirs[$moduleName] ?? null, $version, $class);
 
             if ($file === null) {
+                error_log('migrations: file not found for ' . $moduleName . ':' . $version . ' class ' . $class);
                 $r = new MigrationResult($moduleName . ':' . $version, $moduleName);
                 $r->markFailed("Migration file not found for version {$version}, class {$class}");
                 $results[] = $r;
@@ -1004,6 +991,7 @@ class MigrationSetup
                 $r->markSuccess('purged');
                 $results[] = $r;
             } catch (\Throwable $e) {
+                error_log('migrations: purge failed for ' . $moduleName . ':' . $version . ' — ' . $e->getMessage());
                 $r = new MigrationResult($moduleName . ':' . $version, $moduleName);
                 $r->markFailed($e->getMessage());
                 $results[] = $r;
@@ -1112,6 +1100,7 @@ class MigrationSetup
         $result = new SeedResult($moduleName, $context, $table ?? '(unknown)');
 
         if (empty($table) || empty($rows)) {
+            error_log('migrations: seed entry missing table or rows for ' . $moduleName);
             $result->markFailed('Seed entry missing table or rows');
             return $result;
         }
@@ -1127,8 +1116,8 @@ class MigrationSetup
 
             $result->markSuccess(count($rows) . ' row(s) inserted into ' . $table);
         } catch (\Throwable $e) {
+            error_log('migrations: seed failed for ' . $moduleName . ':' . $table . ' — ' . $e->getMessage());
             $result->markFailed($e->getMessage());
-            // No rollback - log, skip, continue
         }
 
         return $result;

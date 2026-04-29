@@ -32,7 +32,7 @@ use Enlivenapp\Migrations\Services\TableSnapshot;
  *       ->addForeignKey(['org_id'], 'orgs', ['id'], ['delete' => 'CASCADE'])
  *       ->create();
  *
- * Supported column types: primary, integer, biginteger, string, char, text, mediumtext, longtext, boolean, datetime, timestamp, time, date, float, decimal, enum, set, blob, binary, json.
+ * Supported column types: primary, integer, biginteger, tinyint, string, char, text, mediumtext, longtext, boolean, datetime, timestamp, time, date, float, decimal, enum, set, blob, binary, json.
  *
  * Supported column options: nullable (bool), default (mixed), length (int), precision (int), scale (int), unsigned (bool), comment (string), after (string), first (bool), auto_increment (bool).
  */
@@ -1162,6 +1162,15 @@ class SchemaBuilder
                 }
                 break;
 
+            case 'tinyint':
+                $length = $options['length'] ?? 4;
+                $def = sprintf('`%s` TINYINT(%d)', $name, $length);
+                $def .= $nullable ? ' NULL' : ' NOT NULL';
+                if ($hasDefault) {
+                    $def .= ' DEFAULT ' . (int) $default;
+                }
+                break;
+
             case 'datetime':
                 $def = sprintf('`%s` DATETIME', $name);
                 $def .= $nullable ? ' NULL' : ' NOT NULL';
@@ -1258,7 +1267,7 @@ class SchemaBuilder
             default:
                 throw new MigrationException(
                     "Unknown column type \"{$type}\" for column \"{$name}\". " .
-                    'Supported: primary, integer, biginteger, string, char, text, mediumtext, longtext, boolean, datetime, timestamp, time, date, float, decimal, enum, set, blob, binary, json.'
+                    'Supported: primary, integer, biginteger, tinyint, string, char, text, mediumtext, longtext, boolean, datetime, timestamp, time, date, float, decimal, enum, set, blob, binary, json.'
                 );
         }
 

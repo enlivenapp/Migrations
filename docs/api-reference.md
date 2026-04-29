@@ -18,10 +18,10 @@ No framework dependency. If no PDO is provided, `ConfigLoader` resolves the conn
 
 **`runMigrate` behavior:**
 
-- Discovers packages from configured migration paths
-- Reads the installed version from `composer/installed.json` (ceiling)
-- Reads the last seeded version from the `seeds` table (floor)
-- Runs any pending migrations, then any new seeds if the version changed
+- On first run, creates infrastructure tables (`migrations`, `seeds`, `migrations_lock`) and writes a `.migrations_installed` marker file in the project root. Subsequent requests skip table creation entirely (file check only, no DB).
+- Preloads all installed versions (from `composer/installed.json`) and seeded versions (single query) in bulk.
+- Compares pending migration files and seed versions against what's been run. If nothing is pending, returns early — no lock acquired, no batch created.
+- When work is pending: acquires the lock, runs migrations and seeds in one batch, releases the lock.
 - Infrastructure errors (no DB, lock held) throw. Per-package errors are caught and recorded in the result.
 - Returns only packages where something ran, keyed by package name.
 
@@ -168,7 +168,7 @@ Concurrency lock backed by the `migrations_lock` table. Uses a compare-and-swap 
 
 | Method | Return | Description |
 |---|---|---|
-| `acquire(): bool` | `bool` | Attempt to acquire the lock; returns `false` if already held |
+| `acquire(): bool` | `bool` | Attempt to acquire the lock; returns `false` if already held. Lock table must already exist (created by `ensureTrackingTable()` on first install). |
 | `release(): void` | `void` | Release the lock unconditionally |
 | `isLocked(): bool` | `bool` | Return `true` if the lock is currently held by any process |
 | `getLockInfo(): ?array` | `array{locked_by: string\|null, locked_at: string\|null}\|null` | Return lock metadata if held, `null` if free |

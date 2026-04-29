@@ -1521,18 +1521,20 @@ PHP;
         'migrations' => ['paths' => ['vendor/*/*/src/Database/Migrations']],
     ], $tmpDir);
 
-    $migResults = $setup->runAll();
+    $moduleResults = $setup->runMigrate();
 
     $hadFailure = false;
     $hadRollback = false;
     $resultDetails = [];
-    foreach ($migResults as $r) {
-        $resultDetails[] = $r->getName() . '=' . ($r->isSuccess() ? 'ok' : 'FAIL');
-        if (!$r->isSuccess() && !str_ends_with($r->getName(), ':rollback')) {
-            $hadFailure = true;
-        }
-        if (str_ends_with($r->getName(), ':rollback') && $r->isSuccess()) {
-            $hadRollback = true;
+    foreach ($moduleResults as $moduleResult) {
+        foreach ($moduleResult->getMigrationResults() as $r) {
+            $resultDetails[] = $r->getName() . '=' . ($r->isSuccess() ? 'ok' : 'FAIL');
+            if (!$r->isSuccess() && !str_ends_with($r->getName(), ':rollback')) {
+                $hadFailure = true;
+            }
+            if (str_ends_with($r->getName(), ':rollback') && $r->isSuccess()) {
+                $hadRollback = true;
+            }
         }
     }
 
@@ -1624,11 +1626,11 @@ PHP;
         'migrations' => ['paths' => ['vendor/*/*/src/Database/Migrations']],
     ], $tmpDir);
 
-    $migResults = $setup->runAll();
+    $moduleResults = $setup->runMigrate();
 
     $allSuccess = true;
-    foreach ($migResults as $r) {
-        if (!$r->isSuccess()) {
+    foreach ($moduleResults as $moduleResult) {
+        if (!$moduleResult->isSuccess()) {
             $allSuccess = false;
         }
     }
@@ -1694,14 +1696,14 @@ PHP;
     ], $tmpDir);
 
     // Run forward
-    $migResults = $setup->runAll();
+    $moduleResults = $setup->runMigrate();
 
     $verify = new SchemaBuilder($pdo);
     $errors = [];
 
     $allSuccess = true;
-    foreach ($migResults as $r) {
-        if (!$r->isSuccess()) {
+    foreach ($moduleResults as $moduleResult) {
+        if (!$moduleResult->isSuccess()) {
             $allSuccess = false;
         }
     }

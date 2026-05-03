@@ -11,7 +11,6 @@ declare(strict_types=1);
 namespace Enlivenapp\Migrations\Services;
 
 use Enlivenapp\Migrations\Interfaces\MigrationInterface;
-use Enlivenapp\Migrations\Services\SchemaBuilder;
 
 /**
  * Base class that every migration file extends.

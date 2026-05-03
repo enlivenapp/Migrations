@@ -107,9 +107,8 @@ class MigrateMakeCommand extends AbstractBaseCommand
             }
         }
 
-        // Conventional default: vendor/vendor/package/src/Database/Migrations
-        $parts     = explode('/', $module, 2);
-        $vendorDir = isset($parts[1]) ? 'vendor/' . $module : 'vendor/' . $module;
+        // Conventional default: vendor/{vendor}/{package}/src/Database/Migrations
+        $vendorDir = 'vendor/' . $module;
 
         return getcwd() . '/' . $vendorDir . '/src/Database/Migrations';
     }

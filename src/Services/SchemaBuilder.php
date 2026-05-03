@@ -11,7 +11,6 @@ declare(strict_types=1);
 namespace Enlivenapp\Migrations\Services;
 
 use Enlivenapp\Migrations\Exceptions\MigrationException;
-use Enlivenapp\Migrations\Services\TableSnapshot;
 
 /**
  * The table builder you use inside migrations to create, modify, or drop tables.

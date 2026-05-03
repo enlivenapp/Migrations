@@ -1,10 +1,17 @@
-[![Version](http://poser.pugx.org/enlivenapp/migrations/version)](https://packagist.org/packages/enlivenapp/migrations)
-[![License](http://poser.pugx.org/enlivenapp/migrations/license)](https://packagist.org/packages/enlivenapp/migrations)
-[![Suggesters](http://poser.pugx.org/enlivenapp/migrations/suggesters)](https://packagist.org/packages/enlivenapp/migrations)
-[![PHP Version Require](http://poser.pugx.org/enlivenapp/migrations/require/php)](https://packagist.org/packages/enlivenapp/migrations)
-[![Monthly Downloads](https://poser.pugx.org/enlivenapp/migrations/d/monthly)](https://packagist.org/packages/enlivenapp/migrations)
+[![Stable? Not Quite Yet](https://img.shields.io/badge/stable%3F-not%20quite%20yet-blue?style=for-the-badge)](https://packagist.org/packages/enlivenapp/migrations)
+[![License](https://img.shields.io/packagist/l/enlivenapp/migrations?style=for-the-badge)](https://packagist.org/packages/enlivenapp/migrations)
+[![PHP Version](https://img.shields.io/packagist/php-v/enlivenapp/migrations?style=for-the-badge)](https://packagist.org/packages/enlivenapp/migrations)
+[![Monthly Downloads](https://img.shields.io/packagist/dm/enlivenapp/migrations?style=for-the-badge)](https://packagist.org/packages/enlivenapp/migrations)
+[![Total Downloads](https://img.shields.io/packagist/dt/enlivenapp/migrations?style=for-the-badge)](https://packagist.org/packages/enlivenapp/migrations)
+[![GitHub Issues](https://img.shields.io/github/issues/enlivenapp/Migrations?style=for-the-badge)](https://github.com/enlivenapp/Migrations/issues)
+[![Contributors](https://img.shields.io/github/contributors/enlivenapp/Migrations?style=for-the-badge)](https://github.com/enlivenapp/Migrations/graphs/contributors)
+[![Latest Release](https://img.shields.io/github/v/release/enlivenapp/Migrations?style=for-the-badge)](https://github.com/enlivenapp/Migrations/releases)
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-blue?style=for-the-badge)](https://github.com/enlivenapp/Migrations/pulls)
 
 # Migrations Library
+
+**I noticed folks downloading some of these packages. I'm super grateful, Thank You!  I would like to let folks know until this notice disappears I'm doing a lot of breaking changes without worrying about them.  Once versions are up around 0.5.x things should settle down.**
+
 
 Migrations is a single-package standalone PHP library for database migrations and seeds with minimal requirements. It tracks changes applied to your database and runs new ones in order. No framework required, just a database connection. MySQL and MariaDB supported currently. Optional CLI support is available through the `flightphp/runway` CLI.  
 

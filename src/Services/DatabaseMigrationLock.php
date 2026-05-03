@@ -10,7 +10,6 @@ declare(strict_types=1);
 
 namespace Enlivenapp\Migrations\Services;
 
-use Enlivenapp\Migrations\Services\DbConnection;
 
 /**
  * Prevents two processes from running migrations at the same time.

@@ -8,7 +8,7 @@
  *
  * Usage: (2-4 minute runtime depending on computer setup)
  *   From project root:
- *   php vendor/enlivenapp/migrations/tests/SafetyNetTest.php
+ *   php vendor/enlivenapp/migrations/tests/DataSaverTest.php
  *
  * All test tables use the prefix `_test_sn_` and are cleaned up between tests.
  * Report is written to DataSaverResults.md alongside this file.

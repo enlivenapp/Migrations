@@ -13,9 +13,7 @@ namespace Enlivenapp\Migrations\Services;
 use Composer\Semver\Comparator;
 use Enlivenapp\Migrations\Exceptions\LockException;
 use Enlivenapp\Migrations\Exceptions\MigrationException;
-use Enlivenapp\Migrations\Services\ConfigLoader;
-use Enlivenapp\Migrations\Services\DbConnection;
-use Enlivenapp\Migrations\Services\SchemaBuilder;
+
 
 /**
  * The main entry point for running migrations and seeds.
@@ -82,14 +80,6 @@ class MigrationSetup
      *
      * @param string|null $moduleName  Package name to run for, or null for all packages
      * @return array<string, ModuleResult>  Results keyed by package name (only packages where something ran)
-     * @throws LockException If the migration lock is held by another process
-     * @throws MigrationException If $moduleName is given but not found
-     */
-    /**
-     * Run all pending migrations and seeds, optionally scoped to one module.
-     *
-     * @param  string|null $moduleName  Scope to a single module, or null for all
-     * @return ModuleResult[]  Keyed by package name
      * @throws LockException If the migration lock is held by another process
      * @throws MigrationException If $moduleName is given but not found
      */
@@ -225,16 +215,14 @@ class MigrationSetup
      * are still attempted. Each package's result is included in the returned array
      * regardless of success or failure.
      *
+     * @deprecated Use runMigrate() directly. This method exists for backward compatibility.
+     *
      * @param bool $dryRun  When true, all migrations execute inside a database transaction
      *                      that is rolled back at the end - nothing is permanently written.
      *                      Useful for checking whether migrations will run cleanly.
-     * @return MigrationResult[]  One result entry per migration attempted, across all packages.
-     *                            Check each result's success flag individually.
+     * @return ModuleResult[]  One result entry per migration attempted, across all packages.
+     *                         Check each result's success flag individually.
      * @throws LockException  If another migration process is already holding the lock
-     */
-    /**
-     * @deprecated Use runMigrate() directly. This method exists for backward compatibility.
-     * @return ModuleResult[]
      */
     public function runAll(bool $dryRun = false): array
     {
@@ -694,43 +682,6 @@ class MigrationSetup
         return $versions;
     }
 
-    /**
-     * Read the installed Composer version of a package from vendor/composer/installed.json.
-     */
-    private function readInstalledVersion(string $packageName): ?string
-    {
-        $installedFile = $this->projectRoot . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR
-            . 'composer' . DIRECTORY_SEPARATOR . 'installed.json';
-
-        if (! is_file($installedFile)) {
-            return null;
-        }
-
-        $installed = json_decode(file_get_contents($installedFile), true);
-        $packages  = $installed['packages'] ?? $installed ?? [];
-
-        foreach ($packages as $pkg) {
-            if (($pkg['name'] ?? null) === $packageName) {
-                $version = $pkg['version'] ?? null;
-                return $version !== null ? ltrim($version, 'v') : null;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Read the last seeded version for a package from the seeds table.
-     */
-    private function getSeededVersion(string $packageName): ?string
-    {
-        $rows = $this->db->query(
-            'SELECT `version` FROM `' . self::SEED_TABLE . '` WHERE `package` = ?',
-            [$packageName]
-        );
-
-        return ! empty($rows) ? $rows[0]['version'] : null;
-    }
 
     /**
      * Record or update the seeded version for a package.

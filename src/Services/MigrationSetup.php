@@ -87,16 +87,31 @@ class MigrationSetup
     {
         $this->ensureTrackingTable();
 
-        $dirs = $this->resolveAllMigrationDirs();
+        // Build combined package map: each entry has migration_dir and/or seed_dir
+        $migrationDirs = $this->resolveAllMigrationDirs();
+        $seedDirs      = $this->resolveAllSeedDirs();
+
+        $packages = [];
+        foreach ($migrationDirs as $name => $dir) {
+            $packages[$name]['migration_dir'] = $dir;
+            // Seed dir: prefer seed paths config, fall back to sibling derivation
+            $packages[$name]['seed_dir'] = $seedDirs[$name] ?? $this->resolveModuleSeedDir($dir);
+        }
+        foreach ($seedDirs as $name => $dir) {
+            if (!isset($packages[$name])) {
+                $packages[$name]['migration_dir'] = null;
+                $packages[$name]['seed_dir']      = $dir;
+            }
+        }
 
         if ($moduleName !== null) {
-            if (! isset($dirs[$moduleName])) {
+            if (! isset($packages[$moduleName])) {
                 throw new MigrationException(
-                    "No migration directory found for module \"{$moduleName}\". "
-                    . 'Does it have a Database/Migrations directory matching the configured paths?'
+                    "No migration or seed directory found for module \"{$moduleName}\". "
+                    . 'Does it have a Database/Migrations or Database/Seeds directory matching the configured paths?'
                 );
             }
-            $dirs = [$moduleName => $dirs[$moduleName]];
+            $packages = [$moduleName => $packages[$moduleName]];
         }
 
         // Pre-check for pending work before acquiring the lock.
@@ -108,21 +123,23 @@ class MigrationSetup
 
         $hasPending = false;
 
-        foreach ($dirs as $name => $dir) {
-            foreach ($this->discoverMigrationFiles($dir) as $version => $info) {
-                if (! in_array($version, $executedVersions, true)) {
-                    $hasPending = true;
-                    break 2;
+        foreach ($packages as $name => $pkg) {
+            if ($pkg['migration_dir'] !== null) {
+                foreach ($this->discoverMigrationFiles($pkg['migration_dir']) as $version => $info) {
+                    if (! in_array($version, $executedVersions, true)) {
+                        $hasPending = true;
+                        break 2;
+                    }
                 }
             }
         }
 
         if (! $hasPending) {
-            foreach ($dirs as $name => $dir) {
+            foreach ($packages as $name => $pkg) {
                 $installedVersion = $allInstalledVersions[$name] ?? null;
                 $seededVersion    = $allSeededVersions[$name] ?? null;
                 if ($installedVersion !== null && $installedVersion !== $seededVersion) {
-                    $seedDir = $this->resolveModuleSeedDir($dir);
+                    $seedDir = $pkg['seed_dir'];
                     if ($seedDir !== null && is_file(rtrim($seedDir, '/') . '/Seed.php')) {
                         $hasPending = true;
                         break;
@@ -150,29 +167,30 @@ class MigrationSetup
         try {
             $batch = $this->nextBatch();
 
-            foreach ($dirs as $name => $dir) {
+            foreach ($packages as $name => $pkg) {
                 try {
                     $moduleResult     = new ModuleResult($name);
                     $installedVersion = $allInstalledVersions[$name] ?? null;
                     $seededVersion    = $allSeededVersions[$name] ?? null;
 
-                    // Run pending migrations
-                    $migrationResults = $this->runModuleMigrations($name, $dir, $batch, false, $executedVersions);
-                    $moduleResult->setMigrationResults($migrationResults);
+                    // Run pending migrations if this package has a migration dir
+                    $ranMigrations = false;
+                    if ($pkg['migration_dir'] !== null) {
+                        $migrationResults = $this->runModuleMigrations($name, $pkg['migration_dir'], $batch, false, $executedVersions);
+                        $moduleResult->setMigrationResults($migrationResults);
+                        $ranMigrations = ! empty($migrationResults);
 
-                    $ranMigrations = ! empty($migrationResults);
-
-                    if ($moduleResult->hasMigrationFailure()) {
-                        $moduleResult->setVersion($installedVersion);
-                        $results[$name] = $moduleResult;
-                        continue;
+                        if ($moduleResult->hasMigrationFailure()) {
+                            $moduleResult->setVersion($installedVersion);
+                            $results[$name] = $moduleResult;
+                            continue;
+                        }
                     }
 
                     // Run seeds if version changed
                     $ranSeeds = false;
                     if ($installedVersion !== null && $installedVersion !== $seededVersion) {
-                        $seedDir  = $this->resolveModuleSeedDir($dir);
-                        $seedData = $this->resolveSeedData($name, $seedDir);
+                        $seedData = $this->resolveSeedData($name, $pkg['seed_dir']);
                         if ($seedData !== null) {
                             $seedResults = $this->runSeeds($name, $seedData, $seededVersion, $installedVersion);
                             $moduleResult->setSeedResults($seedResults);
@@ -1057,7 +1075,12 @@ class MigrationSetup
         }
 
         try {
+            $now = date('Y-m-d H:i:s');
+
             foreach ($rows as $row) {
+                $row['created_at'] = $now;
+                $row['updated_at'] = $now;
+
                 $cols = array_keys($row);
                 $placeholders = implode(', ', array_fill(0, count($cols), '?'));
                 $colList = implode(', ', array_map(fn($c) => '`' . $c . '`', $cols));
@@ -1213,6 +1236,29 @@ class MigrationSetup
     private function resolveAllMigrationDirs(): array
     {
         $patterns = $this->config['migrations']['paths'] ?? [];
+        $dirs     = [];
+
+        foreach ($patterns as $pattern) {
+            $absPattern = $this->absolutePath($pattern);
+            foreach (glob($absPattern, GLOB_ONLYDIR) ?: [] as $dir) {
+                $moduleName = $this->deriveModuleName($dir, $pattern);
+                if ($moduleName !== null) {
+                    $dirs[$moduleName] = $dir;
+                }
+            }
+        }
+
+        return $dirs;
+    }
+
+    /**
+     * Resolve all seed directories from config seed paths.
+     *
+     * @return array<string, string>  module-name => absolute seed directory path
+     */
+    private function resolveAllSeedDirs(): array
+    {
+        $patterns = $this->config['migrations']['seeds']['paths'] ?? [];
         $dirs     = [];
 
         foreach ($patterns as $pattern) {

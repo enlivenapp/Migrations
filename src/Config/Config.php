@@ -25,6 +25,7 @@ return [
         // Paths where migration files live, relative to your project root.
         // Use * as a wildcard to match any folder name.
         'paths' => [
+            'vendor/*/*/Database/Migrations',
             'vendor/*/*/src/Database/Migrations',
             'plugins/*/Database/Migrations',
         ],
@@ -33,6 +34,7 @@ return [
             // Paths where seed file live
             // Use * as a wildcard to match any folder name.
             'paths'  => [
+                'vendor/*/*/Database/Seeds',
                 'vendor/*/*/src/Database/Seeds',
                 'plugins/*/Database/Seeds',
             ],

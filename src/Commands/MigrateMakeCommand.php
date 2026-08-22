@@ -107,10 +107,12 @@ class MigrateMakeCommand extends AbstractBaseCommand
             }
         }
 
-        // Conventional default: vendor/{vendor}/{package}/src/Database/Migrations
+        // Conventional default: vendor/{vendor}/{package}/Database/Migrations
         $vendorDir = 'vendor/' . $module;
+        $newPath = getcwd() . '/' . $vendorDir . '/Database/Migrations';
+        $oldPath = getcwd() . '/' . $vendorDir . '/src/Database/Migrations';
 
-        return getcwd() . '/' . $vendorDir . '/src/Database/Migrations';
+        return is_dir($newPath) ? $newPath : $oldPath;
     }
 
     /**

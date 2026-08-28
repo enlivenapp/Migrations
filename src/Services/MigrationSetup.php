@@ -138,7 +138,12 @@ class MigrationSetup
             foreach ($packages as $name => $pkg) {
                 $installedVersion = $allInstalledVersions[$name] ?? null;
                 $seededVersion    = $allSeededVersions[$name] ?? null;
-                if ($installedVersion !== null && $installedVersion !== $seededVersion) {
+
+                // Seeds are pending when a package has a seed file and either
+                // has never been seeded (no record in the seeds table) or its
+                // version changed since the last seed. The version source may
+                // be caller-provided (pubvana.json semver) or composer.
+                if ($seededVersion === null || ($installedVersion !== null && $installedVersion !== $seededVersion)) {
                     $seedDir = $pkg['seed_dir'];
                     if ($seedDir !== null && is_file(rtrim($seedDir, '/') . '/Seed.php')) {
                         $hasPending = true;
@@ -187,14 +192,19 @@ class MigrationSetup
                         }
                     }
 
-                    // Run seeds if version changed
+                    // Run seeds when the package has never been seeded or its version changed.
                     $ranSeeds = false;
-                    if ($installedVersion !== null && $installedVersion !== $seededVersion) {
+                    if ($seededVersion === null || ($installedVersion !== null && $installedVersion !== $seededVersion)) {
                         $seedData = $this->resolveSeedData($name, $pkg['seed_dir']);
                         if ($seedData !== null) {
-                            $seedResults = $this->runSeeds($name, $seedData, $seededVersion, $installedVersion);
+                            // runSeeds() needs a concrete "new" version. When no
+                            // version source resolves (null), record the sentinel
+                            // '0.0.0' so the install block runs once and the row
+                            // is tracked; versioned deltas only fire on real versions.
+                            $runVersion = $installedVersion ?? '0.0.0';
+                            $seedResults = $this->runSeeds($name, $seedData, $seededVersion, $runVersion);
                             $moduleResult->setSeedResults($seedResults);
-                            $this->updateSeededVersion($name, $installedVersion);
+                            $this->updateSeededVersion($name, $runVersion);
                             $ranSeeds = true;
                         }
                     }
@@ -659,21 +669,24 @@ class MigrationSetup
      */
     private function loadAllInstalledVersions(): array
     {
+        // Caller-provided versions (e.g. pubvana.json semver for core and
+        // local plugins, which are not composer packages) take precedence.
+        $versions = $this->config['migrations']['versions'] ?? [];
+
         $installedFile = $this->projectRoot . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR
             . 'composer' . DIRECTORY_SEPARATOR . 'installed.json';
 
         if (! is_file($installedFile)) {
-            return [];
+            return $versions;
         }
 
         $installed = json_decode(file_get_contents($installedFile), true);
         $packages  = $installed['packages'] ?? $installed ?? [];
 
-        $versions = [];
         foreach ($packages as $pkg) {
             $name    = $pkg['name'] ?? null;
             $version = $pkg['version'] ?? null;
-            if ($name !== null && $version !== null) {
+            if ($name !== null && $version !== null && ! isset($versions[$name])) {
                 $versions[$name] = ltrim($version, 'v');
             }
         }
@@ -1084,7 +1097,7 @@ class MigrationSetup
                 $cols = array_keys($row);
                 $placeholders = implode(', ', array_fill(0, count($cols), '?'));
                 $colList = implode(', ', array_map(fn($c) => '`' . $c . '`', $cols));
-                $stmt = $this->pdo->prepare("INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders})");
+                $stmt = $this->pdo->prepare("INSERT IGNORE INTO `{$table}` ({$colList}) VALUES ({$placeholders})");
                 $stmt->execute(array_values($row));
             }
 
@@ -1295,6 +1308,14 @@ class MigrationSetup
      */
     private function deriveModuleName(string $dir, string $pattern): ?string
     {
+        // Explicit name override per configured pattern. Lets a host app give
+        // its own code a real identity (e.g. "app/Database/Migrations" →
+        // "pubvana/pubvana") instead of a directory basename artifact.
+        $overrides = $this->config['migrations']['module_names'] ?? [];
+        if (isset($overrides[$pattern]) && $overrides[$pattern] !== '') {
+            return (string) $overrides[$pattern];
+        }
+
         if (str_starts_with($pattern, 'vendor/')) {
             $parts     = explode('/', $dir);
             $vendorIdx = array_search('vendor', $parts);

@@ -1,6 +1,30 @@
 # Changelog
 
+---
 
+## v0.3.0 - 2026-08-28
+
+### Added
+
+- **Caller-provided version map** (`migrations.versions`). Core modules and local
+  plugins (which are not composer packages) can supply their own versions, which
+  take precedence over `vendor/composer/installed.json`. This lets non-composer
+  code be tracked and seeded like a normal package.
+- **`migrations.module_names` override**. Allows a host app to give a migration
+  path pattern a real package identity (e.g. `app/Database/Migrations` →
+  `pubvana/pubvana`) instead of a directory basename artifact.
+
+### Changed
+
+- **Seeds now run for non-composer packages.** Previously seeds only ran when a
+  package had a resolvable installed version (`composer/installed.json`), so core
+  and local-plugin seeds silently never ran. The gate is now: *seed file exists
+  AND (no seed record OR version changed)*. Packages without a resolvable version
+  seed once using a `0.0.0` sentinel so the `install` block runs and the row is
+  tracked.
+- **Seeds use `INSERT IGNORE`.** Rows that collide with pre-existing unique
+  values are silently skipped instead of erroring, so seeds are idempotent and
+  safe to run against existing data.
 
 ---
 

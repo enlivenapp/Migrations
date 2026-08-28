@@ -32,7 +32,10 @@ The data saver automatically attempts to protect every migration against partial
 #### Quick notes:
 
 - to use command line functionality, you'll need to `require flightphp/runway`, otherwise you'll only have programatic access.
-- versions differences are derived from composer/installed,json and the seeds table in the database.
+- versions differences are derived from a caller-provided `migrations.versions` map
+  (which takes precedence) merged with `composer/installed.json`, compared against the
+  seeds table in the database. Non-composer packages (core, local plugins) seed once
+  using a `0.0.0` sentinel when no version resolves.
 
 > If you're familiar with Phinx/CakePHP you'll find the fluent chain very familiar. Codeingiter and Sympony users will find these fairly intuitive.  Laravel... o_0  :D
 
@@ -121,6 +124,43 @@ return [
 
 *Important Notes:* 
 - If a database connection is not found, Migrations will throw an exception.
+
+### Additional configuration
+
+Two optional keys let you seed and track code that isn't a composer package (for
+example, a host app's own migrations under `app/Database/Migrations`, or local
+plugins in `plugins/`). Both live under the `migrations` key in your config.
+
+```php
+return [
+    'migrations' => [
+        // Existing paths / seeds keys omitted for brevity.
+
+        // Version for each module name, taking precedence over
+        // composer/installed.json. Used for seeding deltas.
+        'versions' => [
+            'pubvana/pubvana' => '3.0.0',
+            'plugins/Blog'    => '1.0.0',
+        ],
+
+        // Give a migration path pattern a real package identity.
+        'module_names' => [
+            'app/Database/Migrations' => 'pubvana/pubvana',
+        ],
+    ],
+];
+```
+
+**`versions`** — a map of `moduleName => version`. When a package has no entry in
+`composer/installed.json` (core and local plugins aren't composer packages), this is
+the version used for seeding. If neither this map nor `installed.json` resolves a
+version, the package's `install` seed block runs once using a `0.0.0` sentinel.
+
+**`module_names`** — maps a migration path **pattern** to a module name. By default
+a directory like `app/Database/Migrations` is derived as the basename `Migrations`.
+Use this to give it a real identity (e.g. `pubvana/pubvana`) so its seeds/migrations
+are tracked under that name.
+
 
 ### Manual Use
 
@@ -279,6 +319,12 @@ return [
     ],
 ];
 ```
+
+**Non-composer packages (core, local plugins):** packages without a resolvable
+version in `composer/installed.json` (and no `migrations.versions` entry) run their
+`install` block once using a `0.0.0` sentinel, so the default data is inserted and the
+row is tracked. Seeds use `INSERT IGNORE`, so rows that already exist are silently
+skipped rather than erroring — seeds are idempotent and safe against existing data.
 
 ## Running Migrations Programatically
 

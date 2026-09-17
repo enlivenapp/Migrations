@@ -48,6 +48,20 @@ $pdo = new PDO($dsn, $db['user'], $db['password'], [
     PDO::ATTR_EMULATE_PREPARES   => false,
 ]);
 
+// Migrations resolves its own database connection. Point it at a generated
+// app/config/migrations.php whose credentials match the test connection, so
+// the integration tests exercise the real config source instead of injecting
+// a PDO.
+$configRoot = sys_get_temp_dir() . '/sn_test_config_' . uniqid();
+mkdir($configRoot . '/app/config', 0777, true);
+file_put_contents(
+    $configRoot . '/app/config/migrations.php',
+    "<?php\nreturn " . var_export($db, true) . ";\n"
+);
+if (! defined('RUNWAY_PROJECT_ROOT')) {
+    define('RUNWAY_PROJECT_ROOT', $configRoot);
+}
+
 // ---------------------------------------------------------------------------
 // Test harness — dual verification: SchemaBuilder + raw information_schema
 // ---------------------------------------------------------------------------
@@ -1517,7 +1531,7 @@ PHP;
         'packages' => [['name' => 'test-vendor/test-pkg-g1', 'version' => '1.0.0']],
     ]));
 
-    $setup = new MigrationSetup($pdo, [
+    $setup = new MigrationSetup([
         'migrations' => ['paths' => ['vendor/*/*/src/Database/Migrations']],
     ], $tmpDir);
 
@@ -1622,7 +1636,7 @@ PHP;
         'packages' => [['name' => 'test-vendor/test-pkg-g2', 'version' => '1.0.0']],
     ]));
 
-    $setup = new MigrationSetup($pdo, [
+    $setup = new MigrationSetup([
         'migrations' => ['paths' => ['vendor/*/*/src/Database/Migrations']],
     ], $tmpDir);
 
@@ -1691,7 +1705,7 @@ PHP;
         'packages' => [['name' => 'test-vendor/test-pkg-g3', 'version' => '1.0.0']],
     ]));
 
-    $setup = new MigrationSetup($pdo, [
+    $setup = new MigrationSetup([
         'migrations' => ['paths' => ['vendor/*/*/src/Database/Migrations']],
     ], $tmpDir);
 

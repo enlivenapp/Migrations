@@ -2,6 +2,56 @@
 
 ---
 
+## v0.4.0 - 2026-09-17
+
+### Breaking
+
+- **`MigrationSetup` no longer accepts a PDO.** Migrations resolves its own
+  connection through `ConfigLoader`: `Flight::get('db')` when Flight is loaded,
+  otherwise the credentials in `app/config/migrations.php`. Passing a PDO now
+  throws a `TypeError`. The legacy `new MigrationSetup(null, $config)` positional
+  form still works.
+- **Constructor signature changed** to
+  `__construct(?array $config = null, array|string|null $projectRoot = null)`.
+- **Removed the project-root `config/migrations.php` fallback.** The only config
+  file is `app/config/migrations.php`.
+- **Removed the default `plugins/*` migration/seed paths.** Add plugin paths
+  explicitly via config or the runtime `$config` array.
+- **Config resolution lives in one place.** `MigrationSetup` no longer reads
+  `src/Config/Config.php` or merges defaults itself; it delegates to
+  `ConfigLoader`.
+
+### Added
+
+- **`path_mode` config key** (`replace` | `keys` | `add`) controlling how override
+  `paths` and `seeds.paths` combine with the defaults. It applies to both lists:
+  - `replace` — the override list replaces the default list.
+  - `add` — the override list is appended to the defaults (deduplicated).
+  - `keys` — legacy positional merge (`array_replace_recursive`). This is the
+    default for backward compatibility.
+- **Additive runtime config.** The `$config` array passed to `MigrationSetup`
+  has its `paths` / `seeds.paths` appended to the resolved config (deduped);
+  other keys merge recursively.
+
+### Changed
+
+- **`migrate:all` output.** When nothing runs, it now reports how many migrations
+  are applied across how many modules, or lists the pending migrations that did
+  not run this pass, instead of the bare "Nothing to migrate."
+
+### Deprecated
+
+- **`path_mode => 'keys'`.** It preserves the old positional merge and is
+  deprecated; a future release will make `replace` the default. Set `path_mode`
+  explicitly to opt in.
+
+### Docs
+
+- Updated the README and docs for the new config cascade, `path_mode`, additive
+  runtime config, and removal of the PDO argument and `plugins/*` defaults.
+
+---
+
 ## v0.3.0 - 2026-08-28
 
 ### Added

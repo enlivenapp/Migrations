@@ -62,7 +62,21 @@ class MigrateAllCommand extends AbstractBaseCommand
         }
 
         if (empty($moduleResults)) {
-            $io->info('Nothing to migrate.', true);
+            $executed = $migrate->getExecutedMigrations();
+            $pending  = $migrate->getPendingMigrations();
+
+            if (empty($pending)) {
+                $modules = count(array_unique(array_column($executed, 'module')));
+                $io->ok(
+                    'Up to date: ' . count($executed) . ' migration(s) applied across ' . $modules . ' module(s). Nothing pending.',
+                    true
+                );
+            } else {
+                $io->comment(count($pending) . ' migration(s) pending but none ran this pass:', true);
+                foreach ($pending as $p) {
+                    $io->info('  Pending: ' . $p['name'], true);
+                }
+            }
             return;
         }
 

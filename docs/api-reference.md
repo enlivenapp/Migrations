@@ -5,10 +5,14 @@
 ### Constructor
 
 ```php
-new MigrationSetup(?\PDO $pdo = null, array $config = [], ?string $projectRoot = null)
+new MigrationSetup(?array $config = null, array|string|null $projectRoot = null)
 ```
 
-No framework dependency. If no PDO is provided, `ConfigLoader` resolves the connection automatically: Flight first, then `app/config/migrations.php`, then `config/migrations.php`. See [Configuration](../README.md#configuration) for details. Pass `$config` only to override specific defaults. Pass `$projectRoot` to set the base directory for resolving relative paths (defaults to `RUNWAY_PROJECT_ROOT`, `PROJECT_ROOT`, or `getcwd()`).
+No framework dependency. Migrations resolves the database connection itself — you never pass a PDO. `ConfigLoader` checks `Flight::get('db')` first (if Flight is loaded), then `app/config/migrations.php`. There is no other config file. See [Configuration](../README.md#configuration) for details.
+
+Pass `$config` to add extra paths/seeds and merge other settings at runtime. This array is additive: its `paths` and `seeds.paths` are appended to the resolved config (deduped) regardless of `path_mode`; other keys merge recursively. Pass `$projectRoot` to set the base directory for resolving relative paths (defaults to `RUNWAY_PROJECT_ROOT`, `PROJECT_ROOT`, or `getcwd()`).
+
+The legacy positional form `new MigrationSetup(null, $config)` still works (the `null` first argument is treated as no config).
 
 ### Programmatic entry point
 

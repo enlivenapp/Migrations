@@ -36,7 +36,7 @@ Two scenarios:
 
 ## How seeds are discovered
 
-The seed file lives at `src/Database/Seeds/Seed.php` in your package (or `plugins/{name}/Database/Seeds/Seed.php` for local plugins). The migration runner discovers it automatically by looking for a sibling `Seeds` directory next to your `Migrations` directory.
+The seed file lives at `Database/Seeds/Seed.php` or `src/Database/Seeds/Seed.php` in your package. The migration runner discovers it automatically by looking for a sibling `Seeds` directory next to your `Migrations` directory.
 
 Version tracking is handled internally: the `seeds` table records the last seeded version per package, and `composer/installed.json` provides the current installed version. No version arguments need to be passed. The runner figures out what needs to run on its own.
 

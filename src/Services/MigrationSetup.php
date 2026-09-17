@@ -19,8 +19,16 @@ use Enlivenapp\Migrations\Exceptions\MigrationException;
  * The main entry point for running migrations and seeds.
  *
  * Finds migration files, runs them in order, tracks what's been applied,
- * and rolls back cleanly if something fails. No framework needed - just
- * give it a PDO connection.
+ * and rolls back cleanly if something fails. No framework needed.
+ *
+ * Migrations resolves its own database connection through ConfigLoader:
+ * Flight::get('db') first, then app/config/migrations.php. You never pass a
+ * PDO into this class.
+ *
+ * The `$config` array is always additive: any `paths` / `seeds.paths` you pass
+ * are appended to the resolved configuration (deduped), regardless of the
+ * configured `path_mode`. Other keys (e.g. `versions`, `module_names`) merge
+ * recursively on top of the resolved defaults.
  *
  * Migration files go in your package's Database/Migrations/ directory.
  * Filename format: YYYY-MM-DD-HHmmss_ClassName.php
@@ -34,36 +42,65 @@ class MigrationSetup
     private const TRACKING_TABLE = 'migrations';
     private const SEED_TABLE     = 'seeds';
 
-    private SchemaBuilder        $schemaBuilder;
-    private DbConnection         $db;
+    private SchemaBuilder         $schemaBuilder;
+    private DbConnection          $db;
     private DatabaseMigrationLock $lock;
-
-    private string $projectRoot;
+    private \PDO                  $pdo;
+    private array                 $config;
+    private string                $projectRoot;
 
     public function __construct(
-        private ?\PDO $pdo = null,
-        private array $config = [],
-        ?string $projectRoot = null,
+        ?array $config = null,
+        array|string|null $projectRoot = null,
     ) {
+        // Legacy positional form: new MigrationSetup(null, $config).
+        if ($config === null && is_array($projectRoot)) {
+            $config      = $projectRoot;
+            $projectRoot = null;
+        }
+
         $this->projectRoot = $projectRoot
             ?? (defined('RUNWAY_PROJECT_ROOT') ? RUNWAY_PROJECT_ROOT
             : (defined('PROJECT_ROOT') ? PROJECT_ROOT
             : getcwd()));
 
-        if ($this->pdo === null) {
-            $resolved   = ConfigLoader::load();
-            $this->pdo  = $resolved['pdo'];
-            $defaults   = $resolved['config'];
-        } else {
-            $defaults = require __DIR__ . '/../Config/Config.php';
-        }
-
-        $this->config        = !empty($config)
-            ? array_replace_recursive($defaults, $config)
-            : $defaults;
+        $resolved            = ConfigLoader::load();
+        $this->pdo           = $resolved['pdo'];
+        $this->config        = $this->applyRuntimeConfig($resolved['config'], $config ?? []);
         $this->db            = new DbConnection($this->pdo);
         $this->lock          = new DatabaseMigrationLock($this->db);
         $this->schemaBuilder = new SchemaBuilder($this->pdo);
+    }
+
+    /**
+     * Merge the caller-provided config array on top of the resolved config.
+     *
+     * `paths` and `seeds.paths` are always appended (deduped) to whatever the
+     * config source produced; all other keys merge recursively as before.
+     *
+     * @param  array<string, mixed> $resolved
+     * @param  array<string, mixed> $runtime
+     * @return array<string, mixed>
+     */
+    private function applyRuntimeConfig(array $resolved, array $runtime): array
+    {
+        if (empty($runtime)) {
+            return $resolved;
+        }
+
+        $merged = array_replace_recursive($resolved, $runtime);
+
+        $merged['migrations']['paths'] = array_values(array_unique(array_merge(
+            $resolved['migrations']['paths'] ?? [],
+            $runtime['migrations']['paths'] ?? []
+        )));
+
+        $merged['migrations']['seeds']['paths'] = array_values(array_unique(array_merge(
+            $resolved['migrations']['seeds']['paths'] ?? [],
+            $runtime['migrations']['seeds']['paths'] ?? []
+        )));
+
+        return $merged;
     }
 
     // -----------------------------------------------------------------------

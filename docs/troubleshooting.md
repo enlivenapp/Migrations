@@ -18,7 +18,7 @@ $migrate->forceUnlock();
 
 **Cause:** The module's migration directory doesn't match any of the configured `$config['migrations']['paths']` wildcard patterns.
 
-**Fix:** Check that your migrations are in one of the configured paths (default: `vendor/*/*/src/Database/Migrations` or `plugins/*/Database/Migrations`). Or override the paths in `app/config/migrations.php` or `config/migrations.php`.
+**Fix:** Check that your migrations are in one of the configured paths (default: `vendor/*/*/Database/Migrations` or `vendor/*/*/src/Database/Migrations`). Or override the paths in `app/config/migrations.php` (using `path_mode` to control how they combine).
 
 ## Migration ran but nothing changed in the database
 
@@ -50,7 +50,7 @@ php runway migrate:rollback --module acme/blog
 **Cause (2):** The installed version (from `composer/installed.json`) matches the last seeded version (from the `seeds` table), so there are no new seeds to run.
 **Cause (3):** The seed file doesn't return an array with `install` and/or `versions` keys.
 
-**Fix:** Check that `Seed.php` is in `src/Database/Seeds/` (or `plugins/{name}/Database/Seeds/`). Check the `seeds` table to see the last recorded version for your package.
+**Fix:** Check that `Seed.php` is in `Database/Seeds/` or `src/Database/Seeds/` inside the package. Check the `seeds` table to see the last recorded version for your package.
 
 ## Commands not showing in `php runway --help`
 
